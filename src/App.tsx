@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { BalanceChart } from './components/BalanceChart';
 import { InputsPanel } from './components/InputsPanel';
 import { MethodologyNotes } from './components/MethodologyNotes';
@@ -8,6 +9,7 @@ import { ShareLink } from './components/ShareLink';
 import { DEFAULT_INPUTS } from './lib/defaults';
 import { computeResults } from './lib/model';
 import { decodeInputs, encodeInputs } from './lib/urlState';
+import { stripQuery } from './lib/analytics';
 import type { Inputs } from './lib/types';
 
 type Theme = 'light' | 'dark' | 'system';
@@ -113,8 +115,16 @@ export function App() {
           . This site is not affiliated with or endorsed by them. All of those assumptions are
           editable here, and the methodology section above lists every formula and constant.
         </p>
-        <p>Social Security figures from the Social Security Administration.</p>
+        <p>
+          Social Security figures from the Social Security Administration. The site counts
+          anonymous page views; the numbers you enter live only in your address bar and are
+          stripped before any of that is recorded.
+        </p>
       </footer>
+
+      {/* Page views only. stripQuery removes the scenario from the URL before
+          anything is sent — see lib/analytics.ts. */}
+      <Analytics beforeSend={stripQuery} />
     </div>
   );
 }
