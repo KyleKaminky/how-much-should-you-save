@@ -115,4 +115,13 @@ traditional 401(k), a Roth, and a brokerage account), sequence-of-returns risk
 (returns are smooth; there's no Monte Carlo), spousal and survivor benefits,
 pensions, and healthcare cost inflation. All of these push toward saving more.
 
+## Credit
+
+The starting assumptions — an 80% income replacement target, an age-banded safe
+withdrawal rate, and an assumed return that declines with age — are inspired by
+widely used retirement-planning guidelines, including those popularized by
+[the Money Guy Show](https://moneyguy.com). This project is not affiliated with
+or endorsed by them, reproduces none of their published material, and computes
+every number from its own model. All of those assumptions are editable.
+
 Planning tool, not financial advice.

@@ -104,9 +104,16 @@ export function App() {
           make a decision on its own.
         </p>
         <p>
-          Social Security figures from the Social Security Administration. The methodology section
-          above lists every formula and constant this uses.
+          The starting assumptions — an 80% income replacement target, an age-banded safe
+          withdrawal rate, and an assumed return that declines as you age — are inspired by
+          widely used retirement-planning guidelines, including those popularized by{' '}
+          <a href="https://moneyguy.com" target="_blank" rel="noopener noreferrer">
+            the Money Guy Show
+          </a>
+          . This site is not affiliated with or endorsed by them. All of those assumptions are
+          editable here, and the methodology section above lists every formula and constant.
         </p>
+        <p>Social Security figures from the Social Security Administration.</p>
       </footer>
     </div>
   );
