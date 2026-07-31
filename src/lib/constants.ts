@@ -77,9 +77,12 @@ export function withdrawalRateForAge(retirementAge: number): number {
 export const DEFAULT_GLIDE_PATH = {
   anchorAge: 20,
   startReturn: 0.1,
-  declinePerYear: 0.001,
+  // null means "when I retire" — de-risking finishes at the target date, the
+  // way a target-date fund works. Pinned to 65 this reproduces the familiar
+  // 0.1%/yr decline exactly.
+  floorAge: null,
   floorReturn: 0.055,
-} as const;
+} as { anchorAge: number; startReturn: number; floorAge: number | null; floorReturn: number };
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -94,6 +97,8 @@ export const DEFAULT_WAGE_GROWTH = 0.03;
  * a stable comparison surface regardless of what the user has changed.
  */
 export const REFERENCE_ASSUMPTIONS = {
+  /** Pinned so the grid stays a fixed comparison surface across retirement ages. */
+  floorAge: 65,
   replacementRatio: 0.8,
   inflation: 0.03,
   wageGrowth: 0.03,

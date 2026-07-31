@@ -1,4 +1,11 @@
-import { useId, useState, type ChangeEvent, type ReactNode } from 'react';
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactNode,
+} from 'react';
 
 /**
  * Lets a numeric input hold what you are typing.
@@ -97,6 +104,93 @@ export function NumberField({
       ) : (
         input
       )}
+    </Field>
+  );
+}
+
+
+/**
+ * A dollar field that groups thousands as you type.
+ *
+ * `<input type="number">` cannot show separators — browsers reject any
+ * non-numeric character — so this is a text input that formats on every
+ * keystroke. Worth the extra machinery: the whole point of these fields is
+ * large round numbers, and an unseparated string of zeros is exactly where a
+ * factor-of-ten typo hides.
+ *
+ * Reformatting mid-string would normally throw the caret to the end, so the
+ * caret is restored by counting digits rather than characters — insert a comma
+ * to the left of the cursor and the cursor still sits after the same digit.
+ */
+export function CurrencyField({
+  label,
+  hint,
+  value,
+  onChange,
+  max = 1e12,
+}: {
+  label: string;
+  hint?: ReactNode;
+  value: number;
+  onChange: (v: number) => void;
+  max?: number;
+}) {
+  const id = useId();
+  const ref = useRef<HTMLInputElement>(null);
+  const caretRef = useRef<number | null>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const settled = Number.isFinite(value) ? Math.round(value).toLocaleString('en-US') : '';
+  const display = draft ?? settled;
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const digitsBefore = caretRef.current;
+    if (!el || digitsBefore === null) return;
+    caretRef.current = null;
+
+    // Walk the formatted string until we have passed the same number of digits.
+    let pos = 0;
+    let seen = 0;
+    while (pos < el.value.length && seen < digitsBefore) {
+      if (/\d/.test(el.value[pos])) seen++;
+      pos++;
+    }
+    el.setSelectionRange(pos, pos);
+  }, [display]);
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const caret = e.target.selectionStart ?? raw.length;
+    caretRef.current = raw.slice(0, caret).replace(/\D/g, '').length;
+
+    const digits = raw.replace(/\D/g, '');
+    if (digits === '') {
+      setDraft('');
+      onChange(0);
+      return;
+    }
+
+    const next = Math.min(Number(digits), max);
+    setDraft(next.toLocaleString('en-US'));
+    onChange(next);
+  };
+
+  return (
+    <Field label={label} hint={hint} htmlFor={id}>
+      <div className="input-prefix">
+        <span aria-hidden="true">$</span>
+        <input
+          id={id}
+          ref={ref}
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          value={display}
+          onChange={handleChange}
+          onBlur={() => setDraft(null)}
+        />
+      </div>
     </Field>
   );
 }

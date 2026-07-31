@@ -1,28 +1,46 @@
 import { DEFAULT_GLIDE_PATH } from './constants';
-import type { GlidePathConfig, Inputs, ReturnModel } from './types';
+import type { GlidePathConfig, Inputs, ResolvedGlidePath, ReturnModel } from './types';
 
 /**
- * The declining-return curve, evaluated at an age.
+ * Resolves a glide path against a retirement age.
  *
- * With the default configuration: 10% for a 20-year-old, falling 0.1%/yr,
- * floored at 5.5% (which it reaches at 65).
+ * The curve is defined by where it starts and where it lands: `startReturn` at
+ * `anchorAge`, falling to `floorReturn` by `floorAge`. The annual decline is
+ * derived rather than entered, because the decline rate is the least meaningful
+ * of the four numbers — what people actually have an opinion about is when
+ * de-risking finishes, and that is normally when they retire.
  */
-export function returnForAge(
-  age: number,
-  config: GlidePathConfig = DEFAULT_GLIDE_PATH,
-): number {
-  const raw = config.startReturn - config.declinePerYear * (age - config.anchorAge);
-  // Guard against an inverted configuration (floor above the start), which would
-  // otherwise make the clamp order decide the answer.
-  const floor = Math.min(config.floorReturn, config.startReturn);
-  return Math.max(floor, Math.min(config.startReturn, raw));
+export function resolveGlidePath(
+  config: GlidePathConfig,
+  retirementAge: number,
+): ResolvedGlidePath {
+  const floorAge = config.floorAge ?? retirementAge;
+  const span = floorAge - config.anchorAge;
+
+  // A floor at or before the anchor means there is no glide to speak of — the
+  // curve is already there. Infinity makes returnForAge clamp immediately.
+  const declinePerYear =
+    span > 0 ? Math.max(0, config.startReturn - config.floorReturn) / span : Infinity;
+
+  return {
+    anchorAge: config.anchorAge,
+    startReturn: config.startReturn,
+    floorAge,
+    floorReturn: config.floorReturn,
+    declinePerYear,
+  };
 }
 
-/** The age at which the curve first hits its floor, or null if it never does. */
-export function ageAtFloor(config: GlidePathConfig): number | null {
-  if (config.declinePerYear <= 0) return null;
-  if (config.floorReturn >= config.startReturn) return config.anchorAge;
-  return config.anchorAge + (config.startReturn - config.floorReturn) / config.declinePerYear;
+/** The declining-return curve, evaluated at an age. */
+export function returnForAge(age: number, g: ResolvedGlidePath): number {
+  // Guard an inverted configuration (floor above the start), which would
+  // otherwise let clamp ordering decide the answer.
+  const floor = Math.min(g.floorReturn, g.startReturn);
+  if (age <= g.anchorAge) return g.startReturn;
+  if (!Number.isFinite(g.declinePerYear)) return floor;
+
+  const raw = g.startReturn - g.declinePerYear * (age - g.anchorAge);
+  return Math.max(floor, Math.min(g.startReturn, raw));
 }
 
 /**
@@ -33,9 +51,9 @@ export function ageAtFloor(config: GlidePathConfig): number | null {
  * people investing in the same calendar year are assumed to earn different
  * returns purely because of their ages.
  *
- * `glidePath` applies the same curve year by year as the investor ages, which is
- * what a declining-equity allocation actually looks like. It produces materially
- * higher required savings rates.
+ * `glidePath` walks the curve year by year as the investor ages, which is what a
+ * declining-equity allocation actually looks like. It produces materially higher
+ * required savings rates.
  *
  * Neither touches the withdrawal rate — that is set independently from the
  * retirement-age table or an explicit override.
@@ -44,18 +62,22 @@ export function makeReturnFn(
   model: ReturnModel,
   currentAge: number,
   constantReturn: number,
-  config: GlidePathConfig = DEFAULT_GLIDE_PATH,
+  g: ResolvedGlidePath,
 ): (yearIndex: number) => number {
   switch (model) {
     case 'flat': {
-      const rate = returnForAge(currentAge, config);
+      const rate = returnForAge(currentAge, g);
       return () => rate;
     }
     case 'glidePath':
-      return (yearIndex: number) => returnForAge(currentAge + yearIndex, config);
+      return (yearIndex: number) => returnForAge(currentAge + yearIndex, g);
     case 'constant':
       return () => constantReturn;
   }
+}
+
+export function glidePathFor(inputs: Inputs): ResolvedGlidePath {
+  return resolveGlidePath(inputs.glidePath, inputs.retirementAge);
 }
 
 export function returnFnFor(inputs: Inputs): (yearIndex: number) => number {
@@ -63,8 +85,13 @@ export function returnFnFor(inputs: Inputs): (yearIndex: number) => number {
     inputs.returnModel,
     inputs.currentAge,
     inputs.constantReturn,
-    inputs.glidePath,
+    glidePathFor(inputs),
   );
+}
+
+/** The default curve resolved against a given retirement age. */
+export function defaultGlidePath(retirementAge: number): ResolvedGlidePath {
+  return resolveGlidePath(DEFAULT_GLIDE_PATH, retirementAge);
 }
 
 /**

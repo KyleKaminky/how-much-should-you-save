@@ -30,7 +30,7 @@ export function referenceInputs(currentAge: number, retirementAge: number): Inpu
     inflation: a.inflation,
     wageGrowth: a.wageGrowth,
     returnModel: a.returnModel,
-    glidePath: { ...DEFAULT_GLIDE_PATH },
+    glidePath: { ...DEFAULT_GLIDE_PATH, floorAge: a.floorAge },
     withdrawalRateOverride: a.withdrawalRate,
     savingsRateOverride: null,
     contributionTiming: a.contributionTiming,

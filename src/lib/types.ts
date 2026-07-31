@@ -11,10 +11,25 @@ export interface GlidePathConfig {
   anchorAge: number;
   /** Nominal annual return at `anchorAge`. */
   startReturn: number;
-  /** How much the return drops per year of age. */
-  declinePerYear: number;
+  /**
+   * Age at which the curve reaches `floorReturn`, i.e. when de-risking is done.
+   * `null` means "whenever I retire", which is both the sensible default and
+   * how target-date funds actually work — the glide completes at the target
+   * date. Pinning it to a number decouples the two deliberately.
+   */
+  floorAge: number | null;
   /** Floor the curve never falls below. */
   floorReturn: number;
+}
+
+/** A glide path with `floorAge` resolved and the annual decline derived. */
+export interface ResolvedGlidePath {
+  anchorAge: number;
+  startReturn: number;
+  floorAge: number;
+  floorReturn: number;
+  /** Derived: (startReturn - floorReturn) / (floorAge - anchorAge). */
+  declinePerYear: number;
 }
 
 /** How contributions are assumed to land during the year. */
@@ -140,6 +155,40 @@ export interface Results {
 
   /** Set only when you supplied your own savings rate. */
   yours: YourPath | null;
+
+  /** Whether the withdrawal rate and the assumed return can coexist. */
+  sustainability: Sustainability;
+}
+
+/**
+ * The consistency check between two independently-set inputs: how much you draw
+ * each year, and how much the portfolio is assumed to earn.
+ */
+export interface Sustainability {
+  withdrawalRate: number;
+
+  /** Nominal and real return in the first year of retirement. */
+  nominalAtRetirement: number;
+  realAtRetirement: number;
+  /** Nominal and real return once the curve has settled at its floor. */
+  nominalTerminal: number;
+  realTerminal: number;
+
+  /** Real return minus withdrawal rate. Negative means the portfolio drains. */
+  marginAtRetirement: number;
+  marginTerminal: number;
+
+  /** Balance at which growth exactly covers the withdrawal. */
+  breakEvenAtRetirement: number;
+  breakEvenTerminal: number;
+
+  /** Nominal return needed for this withdrawal rate to hold its real value. */
+  requiredNominalReturn: number;
+
+  /** True when the terminal real return covers the withdrawal rate. */
+  sustainable: boolean;
+  /** Age the glide path reaches its floor. */
+  floorAge: number;
 }
 
 /** What your own savings rate actually buys, measured against the same target. */

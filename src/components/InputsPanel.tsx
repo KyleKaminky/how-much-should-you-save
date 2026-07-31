@@ -1,13 +1,24 @@
 import { DEFAULT_GLIDE_PATH, withdrawalRateForAge } from '../lib/constants';
-import { ageAtFloor, returnForAge } from '../lib/returns';
+import { glidePathFor, returnForAge } from '../lib/returns';
 import { formatCurrency, formatPercent } from '../lib/format';
 import { estimateSocialSecurity } from '../lib/socialSecurity';
 import { realWageGrowth } from '../lib/model';
-import type { Inputs } from '../lib/types';
-import { Checkbox, DraftInput, Field, NumberField, PercentField, Segmented } from './fields';
+import type { Inputs, Results } from '../lib/types';
+import {
+  Checkbox,
+  CurrencyField,
+  DraftInput,
+  Field,
+  NumberField,
+  PercentField,
+  Segmented,
+} from './fields';
+import { SustainabilityNote } from './SustainabilityNote';
 
 interface Props {
   inputs: Inputs;
+  /** Drives the sustainability check beside the withdrawal rate. */
+  results: Results;
   /** The solved rate, shown read-only until you set your own. */
   requiredRate: number;
   onChange: (patch: Partial<Inputs>) => void;
@@ -22,16 +33,17 @@ interface Props {
 function GlidePathFields({ inputs, onChange }: { inputs: Inputs; onChange: Props['onChange'] }) {
   const g = inputs.glidePath;
   const set = (patch: Partial<typeof g>) => onChange({ glidePath: { ...g, ...patch } });
+  const resolved = glidePathFor(inputs);
 
   const isDefault =
     g.anchorAge === DEFAULT_GLIDE_PATH.anchorAge &&
     g.startReturn === DEFAULT_GLIDE_PATH.startReturn &&
-    g.declinePerYear === DEFAULT_GLIDE_PATH.declinePerYear &&
+    g.floorAge === DEFAULT_GLIDE_PATH.floorAge &&
     g.floorReturn === DEFAULT_GLIDE_PATH.floorReturn;
 
-  const floorAge = ageAtFloor(g);
-  const nowRate = returnForAge(inputs.currentAge, g);
-  const retireRate = returnForAge(inputs.retirementAge, g);
+  const followsRetirement = g.floorAge === null;
+  const nowRate = returnForAge(inputs.currentAge, resolved);
+  const retireRate = returnForAge(inputs.retirementAge, resolved);
 
   return (
     <>
@@ -59,27 +71,53 @@ function GlidePathFields({ inputs, onChange }: { inputs: Inputs; onChange: Props
             </div>
             <div className="row-2">
               <PercentField
-                label="Decline per year"
-                value={g.declinePerYear}
-                step={0.01}
-                max={5}
-                onChange={(declinePerYear) => set({ declinePerYear })}
-              />
-              <PercentField
                 label="Floor"
                 value={g.floorReturn}
                 step={0.1}
                 max={30}
                 onChange={(floorReturn) => set({ floorReturn })}
               />
+              <Field
+                label="Floor reached at"
+                htmlFor="floor-age"
+                hint={
+                  followsRetirement ? (
+                    <button type="button" className="link-button" onClick={() => set({ floorAge: inputs.retirementAge })}>
+                      pin
+                    </button>
+                  ) : (
+                    <button type="button" className="link-button" onClick={() => set({ floorAge: null })}>
+                      follow retirement
+                    </button>
+                  )
+                }
+              >
+                {followsRetirement ? (
+                  <input id="floor-age" type="text" readOnly value={resolved.floorAge} />
+                ) : (
+                  <DraftInput
+                    id="floor-age"
+                    min={g.anchorAge + 1}
+                    max={110}
+                    value={g.floorAge as number}
+                    onChange={(floorAge) => set({ floorAge })}
+                  />
+                )}
+              </Field>
             </div>
+            <span className="hint">
+              De-risking finishes at this age, then the return holds at the floor.{' '}
+              {followsRetirement
+                ? 'Tracking your retirement age, the way a target-date fund glides to its target date.'
+                : `Pinned. Your retirement age is ${inputs.retirementAge}.`}
+            </span>
             {!isDefault ? (
               <button
                 type="button"
                 className="link-button"
                 onClick={() => onChange({ glidePath: { ...DEFAULT_GLIDE_PATH } })}
               >
-                Reset the curve to 10% at 20, −0.1%/yr, 5.5% floor
+                Reset the curve to 10% at 20 falling to a 5.5% floor at retirement
               </button>
             ) : null}
           </div>
@@ -92,9 +130,14 @@ function GlidePathFields({ inputs, onChange }: { inputs: Inputs; onChange: Props
         </span>
         <span>
           {formatPercent(g.startReturn, 1)} at age {g.anchorAge}, falling{' '}
-          {formatPercent(g.declinePerYear, 2)} a year to a {formatPercent(g.floorReturn, 1)} floor
-          {floorAge !== null && g.floorReturn < g.startReturn
-            ? ` at age ${Math.round(floorAge)}`
+          {formatPercent(resolved.declinePerYear, 2)} a year to a{' '}
+          {formatPercent(g.floorReturn, 1)} floor at age {resolved.floorAge}
+          {!followsRetirement && resolved.floorAge !== inputs.retirementAge
+            ? ` — ${
+                resolved.floorAge > inputs.retirementAge
+                  ? `${resolved.floorAge - inputs.retirementAge} years after you retire`
+                  : `${inputs.retirementAge - resolved.floorAge} years before you retire`
+              }`
             : ''}
           .{' '}
           {inputs.returnModel === 'flat' ? (
@@ -115,7 +158,7 @@ function GlidePathFields({ inputs, onChange }: { inputs: Inputs; onChange: Props
   );
 }
 
-export function InputsPanel({ inputs, requiredRate, onChange, onReset }: Props) {
+export function InputsPanel({ inputs, results, requiredRate, onChange, onReset }: Props) {
   const tableRate = withdrawalRateForAge(inputs.retirementAge);
   const ss = inputs.socialSecurity;
 
@@ -153,22 +196,16 @@ export function InputsPanel({ inputs, requiredRate, onChange, onReset }: Props) 
             />
           </div>
 
-          <NumberField
+          <CurrencyField
             label="Gross annual income"
             value={inputs.income}
-            min={0}
-            step={1000}
-            prefix="$"
             onChange={(income) => onChange({ income })}
           />
 
-          <NumberField
+          <CurrencyField
             label="Current retirement savings"
             hint="invested balance today"
             value={inputs.currentSavings}
-            min={0}
-            step={1000}
-            prefix="$"
             onChange={(currentSavings) => onChange({ currentSavings })}
           />
 
@@ -493,6 +530,8 @@ export function InputsPanel({ inputs, requiredRate, onChange, onReset }: Props) 
                 : 'Your rate, overriding the age-based guideline.'}
             </span>
           </Field>
+
+          <SustainabilityNote inputs={inputs} results={results} />
 
           <Segmented
             label="Contributions"

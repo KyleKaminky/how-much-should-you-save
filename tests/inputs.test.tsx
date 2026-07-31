@@ -103,9 +103,115 @@ describe('typing into numeric fields', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    const savings = screen.getByLabelText<HTMLInputElement>(/Current retirement savings/);
-    await user.clear(savings);
-    await user.type(savings, '250000');
-    expect(savings.value).toBe('250000');
+    const field = screen.getByLabelText<HTMLInputElement>(/Current retirement savings/);
+    await user.clear(field);
+    await user.type(field, '250000');
+    // Dollar fields group thousands; see the currency-formatting suite below.
+    expect(field.value).toBe('250,000');
+  });
+});
+
+const income = () => screen.getByLabelText<HTMLInputElement>(/Gross annual income/);
+const savings = () => screen.getByLabelText<HTMLInputElement>(/Current retirement savings/);
+
+/**
+ * Thousands separators exist to stop a factor-of-ten typo, so the formatting
+ * has to survive real editing — including inserting a digit mid-number, which
+ * is exactly what someone does when they spot a missing zero.
+ */
+describe('currency formatting', () => {
+  it('groups thousands as you type', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.clear(income());
+    await user.type(income(), '210000');
+    expect(income().value).toBe('210,000');
+  });
+
+  it('formats progressively, not just at the end', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.clear(income());
+    await user.type(income(), '1');
+    expect(income().value).toBe('1');
+    await user.type(income(), '0');
+    expect(income().value).toBe('10');
+    await user.type(income(), '00');
+    expect(income().value).toBe('1,000');
+    await user.type(income(), '0');
+    expect(income().value).toBe('10,000');
+  });
+
+  it('separates a seven-figure balance', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.clear(savings());
+    await user.type(savings(), '1250000');
+    expect(savings().value).toBe('1,250,000');
+  });
+
+  it('ignores commas the user types themselves', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.clear(income());
+    await user.type(income(), '210,000');
+    expect(income().value).toBe('210,000');
+  });
+
+  it('ignores letters and symbols', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.clear(income());
+    await user.type(income(), '$1a2b3c000');
+    expect(income().value).toBe('123,000');
+  });
+
+  it('keeps the caret after the same digit when inserting mid-number', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.clear(income());
+    await user.type(income(), '21000');
+    expect(income().value).toBe('21,000');
+
+    // Put the caret right after "21" and add the missing zero.
+    const el = income();
+    el.setSelectionRange(2, 2);
+    await user.type(el, '0', { initialSelectionStart: 2, initialSelectionEnd: 2 });
+
+    expect(el.value).toBe('210,000');
+    // Three digits precede the caret, so it must sit just after the "0" of 210.
+    expect(el.selectionStart).toBe(3);
+  });
+
+  it('lets the field be cleared', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.clear(income());
+    expect(income().value).toBe('');
+  });
+
+  it('recomputes the result from the typed value', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.clear(income());
+    await user.type(income(), '200000');
+    await user.tab();
+
+    // The monthly figure under the hero should reflect $200,000 of income.
+    expect(document.body.textContent).toContain('200,000');
+  });
+
+  it('exposes a numeric keypad on mobile', () => {
+    render(<App />);
+    expect(income().getAttribute('inputmode')).toBe('numeric');
+    expect(savings().getAttribute('inputmode')).toBe('numeric');
   });
 });

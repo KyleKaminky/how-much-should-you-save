@@ -32,7 +32,7 @@ describe('URL round-trip', () => {
       glidePath: {
         anchorAge: 25,
         startReturn: 0.095,
-        declinePerYear: 0.0015,
+        floorAge: 72,
         floorReturn: 0.045,
       },
       withdrawalRateOverride: 0.037,
@@ -85,10 +85,25 @@ describe('URL round-trip', () => {
     }
   });
 
+  it('omits a null floor age so it keeps following the retirement age', () => {
+    const cfg = { ...DEFAULT_INPUTS, currentAge: 41 };
+    expect(encodeInputs(cfg)).not.toContain('gpfa');
+    expect(round(cfg).glidePath.floorAge).toBeNull();
+  });
+
+  it('round-trips a pinned floor age', () => {
+    const cfg = {
+      ...DEFAULT_INPUTS,
+      glidePath: { ...DEFAULT_INPUTS.glidePath, floorAge: 72 },
+    };
+    expect(encodeInputs(cfg)).toContain('gpfa=72');
+    expect(round(cfg).glidePath.floorAge).toBe(72);
+  });
+
   it('round-trips the nested glide path and Social Security objects', () => {
     const cfg: Inputs = {
       ...DEFAULT_INPUTS,
-      glidePath: { anchorAge: 30, startReturn: 0.08, declinePerYear: 0.002, floorReturn: 0.04 },
+      glidePath: { anchorAge: 30, startReturn: 0.08, floorAge: 62, floorReturn: 0.04 },
       socialSecurity: { enabled: true, claimAge: 62, haircut: 0, piaOverride: null },
     };
     expect(round(cfg)).toEqual(cfg);

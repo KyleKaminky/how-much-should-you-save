@@ -1,7 +1,7 @@
 import { withdrawalRateForAge } from './constants';
-import { returnFnFor, toReal } from './returns';
+import { glidePathFor, returnFnFor, returnForAge, toReal } from './returns';
 import { estimateSocialSecurity } from './socialSecurity';
-import type { Inputs, Results, SimulationResult, YearRow, YourPath } from './types';
+import type { Inputs, Results, SimulationResult, Sustainability, YearRow, YourPath } from './types';
 
 /**
  * The whole model runs in real (today's) dollars.
@@ -235,6 +235,62 @@ export function sustainableSpending(inputs: Inputs, balance: number): number {
   return Math.max(0, (balance - t.bridgeCost) * t.withdrawalRate + t.ssAnnual);
 }
 
+/**
+ * Whether the withdrawal rate and the assumed return can coexist.
+ *
+ * A portfolio holds its real value only while it earns at least what it pays
+ * out. The break-even balance — `spending x (1 + r) / r` — is where growth
+ * exactly covers the withdrawal, and it is hyperbolic in r: as the real return
+ * falls, the pile you need explodes. Halving the real return roughly doubles it.
+ *
+ * The two inputs are set independently on purpose, which means they can be set
+ * in contradiction. This surfaces that rather than letting it show up forty
+ * years later as a curve bending toward zero.
+ */
+export function computeSustainability(inputs: Inputs, spending: number): Sustainability {
+  const g = glidePathFor(inputs);
+  const withdrawalRate = effectiveWithdrawalRate(inputs);
+
+  const nominalAtRetirement =
+    inputs.returnModel === 'constant'
+      ? inputs.constantReturn
+      : inputs.returnModel === 'flat'
+        ? returnForAge(inputs.currentAge, g)
+        : returnForAge(inputs.retirementAge, g);
+
+  // The rate the portfolio settles at for the long run: the floor for a glide
+  // path, the single rate for the other two models.
+  const nominalTerminal =
+    inputs.returnModel === 'glidePath'
+      ? returnForAge(Math.max(inputs.planToAge, g.floorAge), g)
+      : nominalAtRetirement;
+
+  const realAtRetirement = toReal(nominalAtRetirement, inputs.inflation);
+  const realTerminal = toReal(nominalTerminal, inputs.inflation);
+
+  const breakEven = (real: number) =>
+    real > 0 ? (spending * (1 + real)) / real : Infinity;
+
+  // The nominal return a portfolio must earn for this withdrawal rate to hold
+  // its real value: the Fisher inverse of the withdrawal rate.
+  const requiredNominal = (1 + withdrawalRate) * (1 + inputs.inflation) - 1;
+
+  return {
+    withdrawalRate,
+    nominalAtRetirement,
+    realAtRetirement,
+    nominalTerminal,
+    realTerminal,
+    marginAtRetirement: realAtRetirement - withdrawalRate,
+    marginTerminal: realTerminal - withdrawalRate,
+    breakEvenAtRetirement: breakEven(realAtRetirement),
+    breakEvenTerminal: breakEven(realTerminal),
+    requiredNominalReturn: requiredNominal,
+    sustainable: realTerminal >= withdrawalRate,
+    floorAge: g.floorAge,
+  };
+}
+
 /** Everything the UI needs, from one set of inputs. */
 export function computeResults(inputs: Inputs): Results {
   const t = computeTarget(inputs);
@@ -246,9 +302,11 @@ export function computeResults(inputs: Inputs): Results {
   const atZero = simulate(inputs, 0).balanceAtRetirement;
 
   const yours = buildYourPath(inputs, t, requiredSavingsRate);
+  const sustainability = computeSustainability(inputs, t.spendingNeed);
 
   return {
     yours,
+    sustainability,
     requiredSavingsRate,
     requiredTotalRate: requiredSavingsRate + inputs.employerMatch,
     requiredMonthly: finite ? (requiredSavingsRate * inputs.income) / 12 : Infinity,

@@ -48,8 +48,9 @@ export function encodeInputs(inputs: Inputs): string {
   const gd = d.glidePath;
   put('gpa', g.anchorAge, gd.anchorAge);
   put('gps', g.startReturn, gd.startReturn);
-  put('gpd', g.declinePerYear, gd.declinePerYear);
   put('gpf', g.floorReturn, gd.floorReturn);
+  // null means "follow my retirement age"; only a pinned age is written.
+  if (g.floorAge !== null) p.set('gpfa', num(g.floorAge));
 
   if (inputs.withdrawalRateOverride !== null) p.set('wr', num(inputs.withdrawalRateOverride));
   if (inputs.savingsRateOverride !== null) p.set('sr', num(inputs.savingsRateOverride));
@@ -98,7 +99,7 @@ export function decodeInputs(search: string): Inputs {
     glidePath: {
       anchorAge: get('gpa', d.glidePath.anchorAge),
       startReturn: get('gps', d.glidePath.startReturn),
-      declinePerYear: get('gpd', d.glidePath.declinePerYear),
+      floorAge: parseNum(p.get('gpfa')),
       floorReturn: get('gpf', d.glidePath.floorReturn),
     },
 

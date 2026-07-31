@@ -4,6 +4,7 @@ import { BalanceChart } from './components/BalanceChart';
 import { InputsPanel } from './components/InputsPanel';
 import { MethodologyNotes } from './components/MethodologyNotes';
 import { ReferenceGrid } from './components/ReferenceGrid';
+import { ReturnAssumptions } from './components/ReturnAssumptions';
 import { ResultsSummary } from './components/ResultsSummary';
 import { ShareLink } from './components/ShareLink';
 import { DEFAULT_INPUTS } from './lib/defaults';
@@ -84,6 +85,7 @@ export function App() {
       <div className="layout">
         <InputsPanel
           inputs={inputs}
+          results={results}
           requiredRate={results.requiredSavingsRate}
           onChange={patch}
           onReset={() => setRaw(DEFAULT_INPUTS)}
@@ -93,6 +95,7 @@ export function App() {
           <ResultsSummary inputs={inputs} results={results} />
           <ShareLink inputs={inputs} />
           <BalanceChart inputs={inputs} results={results} />
+          <ReturnAssumptions inputs={inputs} results={results} />
           <MethodologyNotes />
           <ReferenceGrid currentAge={inputs.currentAge} />
         </div>

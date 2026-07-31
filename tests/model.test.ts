@@ -8,7 +8,7 @@ import {
   simulate,
   solveRequiredSavingsRate,
 } from '../src/lib/model';
-import { ageAtFloor, returnForAge, toReal } from '../src/lib/returns';
+import { resolveGlidePath, returnForAge, toReal } from '../src/lib/returns';
 import type { Inputs } from '../src/lib/types';
 
 function inputs(overrides: Partial<Inputs> = {}): Inputs {
@@ -254,7 +254,10 @@ describe('Social Security in the target', () => {
     const t = computeTarget(cfg);
 
     // Seven years, discounted at the real return prevailing at retirement.
-    const realReturn = (1 + 0.09) / (1 + cfg.inflation) - 1;
+    // Derived rather than hardcoded: the default decline now depends on the
+    // retirement age, since the floor lands there.
+    const g = resolveGlidePath(cfg.glidePath, cfg.retirementAge);
+    const realReturn = toReal(returnForAge(cfg.currentAge, g), cfg.inflation);
     let expected = 0;
     for (let i = 0; i < 7; i++) expected += t.ssAnnual / Math.pow(1 + realReturn, i);
 
@@ -393,75 +396,105 @@ describe('the glide path affects returns and nothing else', () => {
 });
 
 describe('the return curve is configurable', () => {
-  const curve = (o: Partial<Inputs['glidePath']>) =>
-    inputs({ glidePath: { ...DEFAULT_INPUTS.glidePath, ...o } });
+  const curve = (o: Partial<Inputs['glidePath']>, extra: Partial<Inputs> = {}) =>
+    inputs({ ...extra, glidePath: { ...DEFAULT_INPUTS.glidePath, ...o } });
+  const resolved = (cfg: Inputs) => resolveGlidePath(cfg.glidePath, cfg.retirementAge);
 
-  it('defaults to the published curve', () => {
-    expect(returnForAge(20, DEFAULT_INPUTS.glidePath)).toBeCloseTo(0.1, 10);
-    expect(returnForAge(65, DEFAULT_INPUTS.glidePath)).toBeCloseTo(0.055, 10);
-    expect(returnForAge(30, DEFAULT_INPUTS.glidePath)).toBeCloseTo(0.09, 10);
+  it('reproduces the familiar curve when the floor is pinned at 65', () => {
+    const g = resolveGlidePath({ ...DEFAULT_INPUTS.glidePath, floorAge: 65 }, 60);
+    expect(g.declinePerYear).toBeCloseTo(0.001, 10);
+    expect(returnForAge(20, g)).toBeCloseTo(0.1, 10);
+    expect(returnForAge(30, g)).toBeCloseTo(0.09, 10);
+    expect(returnForAge(65, g)).toBeCloseTo(0.055, 10);
+  });
+
+  it('lands the floor exactly on retirement by default', () => {
+    for (const retirementAge of [55, 60, 65, 70]) {
+      const g = resolveGlidePath(DEFAULT_INPUTS.glidePath, retirementAge);
+      expect(g.floorAge).toBe(retirementAge);
+      expect(returnForAge(retirementAge, g)).toBeCloseTo(0.055, 10);
+      // And not before it.
+      expect(returnForAge(retirementAge - 1, g)).toBeGreaterThan(0.055);
+    }
+  });
+
+  it('derives a steeper decline for an earlier retirement', () => {
+    const early = resolveGlidePath(DEFAULT_INPUTS.glidePath, 50);
+    const late = resolveGlidePath(DEFAULT_INPUTS.glidePath, 70);
+    expect(early.declinePerYear).toBeGreaterThan(late.declinePerYear);
+    // Less time to de-risk means it has to happen faster.
+    expect(early.declinePerYear).toBeCloseTo(0.045 / 30, 10);
+    expect(late.declinePerYear).toBeCloseTo(0.045 / 50, 10);
+  });
+
+  it('honours a pinned floor age', () => {
+    const g = resolved(curve({ floorAge: 80 }, { retirementAge: 60 }));
+    expect(g.floorAge).toBe(80);
+    expect(returnForAge(60, g)).toBeGreaterThan(0.055);
+    expect(returnForAge(80, g)).toBeCloseTo(0.055, 10);
   });
 
   it('honours a different starting return', () => {
     const cfg = curve({ startReturn: 0.08 });
-    expect(returnForAge(20, cfg.glidePath)).toBeCloseTo(0.08, 10);
-    expect(solveRequiredSavingsRate(cfg)).toBeGreaterThan(
-      solveRequiredSavingsRate(inputs()),
-    );
-  });
-
-  it('honours a different decline rate', () => {
-    const cfg = curve({ declinePerYear: 0.002 });
-    // Twice the decline, so twice the drop by 30.
-    expect(returnForAge(30, cfg.glidePath)).toBeCloseTo(0.08, 10);
+    expect(returnForAge(20, resolved(cfg))).toBeCloseTo(0.08, 10);
+    expect(solveRequiredSavingsRate(cfg)).toBeGreaterThan(solveRequiredSavingsRate(inputs()));
   });
 
   it('honours a different floor', () => {
     const cfg = curve({ floorReturn: 0.07 });
-    expect(returnForAge(90, cfg.glidePath)).toBeCloseTo(0.07, 10);
-    expect(returnForAge(30, cfg.glidePath)).toBeCloseTo(0.09, 10);
+    expect(returnForAge(90, resolved(cfg))).toBeCloseTo(0.07, 10);
   });
 
   it('honours a different anchor age', () => {
-    const cfg = curve({ anchorAge: 30 });
-    expect(returnForAge(30, cfg.glidePath)).toBeCloseTo(0.1, 10);
-    expect(returnForAge(40, cfg.glidePath)).toBeCloseTo(0.09, 10);
+    const g = resolved(curve({ anchorAge: 30 }, { retirementAge: 60 }));
+    expect(returnForAge(30, g)).toBeCloseTo(0.1, 10);
+    expect(returnForAge(60, g)).toBeCloseTo(0.055, 10);
+    expect(returnForAge(45, g)).toBeCloseTo((0.1 + 0.055) / 2, 10);
   });
 
   it('never exceeds the starting return below the anchor age', () => {
-    const cfg = DEFAULT_INPUTS.glidePath;
-    expect(returnForAge(5, cfg)).toBeCloseTo(0.1, 10);
-    expect(returnForAge(-50, cfg)).toBeCloseTo(0.1, 10);
+    const g = resolved(inputs());
+    expect(returnForAge(5, g)).toBeCloseTo(0.1, 10);
+    expect(returnForAge(-50, g)).toBeCloseTo(0.1, 10);
   });
 
   it('survives an inverted configuration where the floor exceeds the start', () => {
-    const cfg = { anchorAge: 20, startReturn: 0.05, declinePerYear: 0.001, floorReturn: 0.09 };
+    const g = resolveGlidePath(
+      { anchorAge: 20, startReturn: 0.05, floorAge: 65, floorReturn: 0.09 },
+      60,
+    );
     for (const age of [10, 20, 40, 70]) {
-      const r = returnForAge(age, cfg);
+      const r = returnForAge(age, g);
       expect(Number.isFinite(r)).toBe(true);
       expect(r).toBeCloseTo(0.05, 10);
     }
   });
 
-  it('handles a flat curve with zero decline', () => {
-    const cfg = curve({ declinePerYear: 0 });
-    expect(returnForAge(20, cfg.glidePath)).toBeCloseTo(0.1, 10);
-    expect(returnForAge(80, cfg.glidePath)).toBeCloseTo(0.1, 10);
-    // With no decline, flat and glide path must agree exactly.
-    expect(
-      solveRequiredSavingsRate({ ...cfg, returnModel: 'glidePath' }),
-    ).toBeCloseTo(solveRequiredSavingsRate({ ...cfg, returnModel: 'flat' }), 10);
+  it('survives a floor age at or before the anchor age', () => {
+    const g = resolveGlidePath({ ...DEFAULT_INPUTS.glidePath, floorAge: 20 }, 60);
+    expect(returnForAge(20, g)).toBeCloseTo(0.1, 10);
+    expect(returnForAge(21, g)).toBeCloseTo(0.055, 10);
+    expect(Number.isFinite(returnForAge(50, g))).toBe(true);
   });
 
-  it('reports the age the curve reaches its floor', () => {
-    expect(ageAtFloor(DEFAULT_INPUTS.glidePath)).toBeCloseTo(65, 10);
-    expect(ageAtFloor({ ...DEFAULT_INPUTS.glidePath, declinePerYear: 0 })).toBeNull();
+  it('is flat when the floor equals the starting return', () => {
+    const cfg = curve({ floorReturn: 0.1 });
+    const g = resolved(cfg);
+    expect(returnForAge(20, g)).toBeCloseTo(0.1, 10);
+    expect(returnForAge(80, g)).toBeCloseTo(0.1, 10);
+    expect(solveRequiredSavingsRate({ ...cfg, returnModel: 'glidePath' })).toBeCloseTo(
+      solveRequiredSavingsRate({ ...cfg, returnModel: 'flat' }),
+      10,
+    );
   });
 
   it('leaves the custom-rate model unaffected by the curve', () => {
     const a = inputs({ returnModel: 'constant', constantReturn: 0.07 });
-    const b = curve({ startReturn: 0.02, floorReturn: 0.01 });
-    const c = { ...b, returnModel: 'constant' as const, constantReturn: 0.07 };
+    const c = {
+      ...curve({ startReturn: 0.02, floorReturn: 0.01 }),
+      returnModel: 'constant' as const,
+      constantReturn: 0.07,
+    };
     expect(solveRequiredSavingsRate(c)).toBeCloseTo(solveRequiredSavingsRate(a), 10);
   });
 });
@@ -560,5 +593,80 @@ describe('projecting your own savings rate', () => {
 
   it('clamps a negative rate to zero rather than inventing withdrawals', () => {
     expect(at(-0.2).yours!.rate).toBe(0);
+  });
+});
+
+describe('sustainability check', () => {
+  const at = (o: Partial<Inputs> = {}) => computeResults(inputs(o)).sustainability;
+
+  it('compares the terminal real return against the withdrawal rate', () => {
+    const s = at({ retirementAge: 60, withdrawalRateOverride: 0.04 });
+    expect(s.withdrawalRate).toBe(0.04);
+    expect(s.marginTerminal).toBeCloseTo(s.realTerminal - 0.04, 12);
+    expect(s.sustainable).toBe(s.realTerminal >= 0.04);
+  });
+
+  it('prices the break-even balance as spending x (1+r)/r', () => {
+    const cfg = inputs({ withdrawalRateOverride: 0.04 });
+    const r = computeResults(cfg);
+    const s = r.sustainability;
+    const expected = (r.firstYearSpending * (1 + s.realTerminal)) / s.realTerminal;
+    expect(s.breakEvenTerminal).toBeCloseTo(expected, 4);
+  });
+
+  it('inverts Fisher to state the nominal return a withdrawal rate needs', () => {
+    const s = at({ withdrawalRateOverride: 0.035, inflation: 0.03 });
+    // 3.5% real against 3% inflation needs 6.605% nominal, not 6.5%.
+    expect(s.requiredNominalReturn).toBeCloseTo(1.035 * 1.03 - 1, 12);
+    expect(s.requiredNominalReturn).toBeCloseTo(0.06605, 5);
+  });
+
+  it('uses the floor as the terminal rate on a glide path', () => {
+    const s = at({ returnModel: 'glidePath', retirementAge: 60 });
+    expect(s.nominalTerminal).toBeCloseTo(DEFAULT_INPUTS.glidePath.floorReturn, 10);
+    // The rate at retirement is the floor too, since the floor lands there.
+    expect(s.nominalAtRetirement).toBeCloseTo(s.nominalTerminal, 10);
+  });
+
+  it('keeps the terminal rate above the floor when the floor is pinned later', () => {
+    const s = at({
+      returnModel: 'glidePath',
+      retirementAge: 55,
+      glidePath: { ...DEFAULT_INPUTS.glidePath, floorAge: 85 },
+    });
+    expect(s.nominalAtRetirement).toBeGreaterThan(s.nominalTerminal);
+    expect(s.marginAtRetirement).toBeGreaterThan(s.marginTerminal);
+  });
+
+  it('flags a 3.5% withdrawal against a 5.5% floor as unsustainable', () => {
+    // The case that confused us: 5.5% nominal is 2.43% real, well under 3.5%.
+    const s = at({
+      returnModel: 'glidePath',
+      retirementAge: 55,
+      withdrawalRateOverride: 0.035,
+    });
+    expect(s.realTerminal).toBeCloseTo(0.0243, 3);
+    expect(s.sustainable).toBe(false);
+    expect(s.marginTerminal).toBeLessThan(0);
+    // And it names the fix: you would need a 6.6% nominal floor.
+    expect(s.requiredNominalReturn).toBeCloseTo(0.06605, 4);
+  });
+
+  it('clears the check once the floor is raised enough', () => {
+    const s = at({
+      returnModel: 'glidePath',
+      retirementAge: 55,
+      withdrawalRateOverride: 0.035,
+      glidePath: { ...DEFAULT_INPUTS.glidePath, floorReturn: 0.07 },
+    });
+    expect(s.sustainable).toBe(true);
+    expect(s.marginTerminal).toBeGreaterThan(0);
+  });
+
+  it('treats a zero or negative real return as needing an infinite balance', () => {
+    const s = at({ returnModel: 'constant', constantReturn: 0.01, inflation: 0.03 });
+    expect(s.realTerminal).toBeLessThan(0);
+    expect(s.breakEvenTerminal).toBe(Infinity);
+    expect(s.sustainable).toBe(false);
   });
 });

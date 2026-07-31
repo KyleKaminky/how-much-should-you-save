@@ -709,3 +709,13 @@ a {
 .site-footer strong {
   color: var(--text-secondary);
 }
+
+/* Milestone tags inside the return-assumptions table. */
+.row-marker {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 6px;
+  font-variant-numeric: normal;
+}
